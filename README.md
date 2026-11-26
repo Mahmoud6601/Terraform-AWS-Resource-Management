@@ -1,4 +1,4 @@
-# Terraform AWS Resource Management — Multi-Environment Cloud Foundation
+# aws-terraform-platform — Multi-Environment AWS Infrastructure Foundation
 
 A production-grade, modular **Terraform (`>= 1.10`)** Infrastructure-as-Code platform for provisioning hardened, multi-AZ AWS environments (`dev`, `staging`, `prod`) with encrypted remote state, zero-SSH private compute, Application Load Balancing, CloudWatch observability, native `terraform test` suites, policy-as-code scanning, OIDC GitHub Actions CI/CD, and automated state backup/restore.
 
@@ -68,8 +68,8 @@ flowchart LR
 ## Quick Start — Validate & Test Locally (Zero AWS Account Required)
 
 ```bash
-git clone https://github.com/Mahmoud6601/Terraform-AWS-Resource-Management.git
-cd Terraform-AWS-Resource-Management
+git clone https://github.com/Mahmoud6601/aws-terraform-platform.git
+cd aws-terraform-platform
 
 # Run format check, validation across bootstrap + dev/staging/prod, mocked terraform tests, and installed security scanners
 ./scripts/validate-all.sh

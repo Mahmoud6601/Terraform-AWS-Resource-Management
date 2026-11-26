@@ -6,7 +6,7 @@ BACKEND_CFG := $(ENV_DIR)/backend.hcl
 TFVARS_FILE := $(ENV_DIR)/terraform.tfvars
 
 help:
-	@echo "Terraform AWS Resource Management — Available Targets"
+	@echo "aws-terraform-platform — Available Targets"
 	@echo "  make fmt                     Format all Terraform files"
 	@echo "  make validate                Validate bootstrap and all environments (no AWS creds)"
 	@echo "  make lint                    Run TFLint recursively"
