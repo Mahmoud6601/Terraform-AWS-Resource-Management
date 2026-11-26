@@ -1,0 +1,170 @@
+name: Terraform CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+  pull-requests: write
+  security-events: write
+
+jobs:
+  secret-and-hygiene-scan:
+    name: Secret & Artifact Hygiene Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Fail if state, secrets, or real tfvars are tracked
+        run: |
+          set -euo pipefail
+          if git ls-files '*.tfstate' '*.tfstate.*' '*.tfplan' '*.key' '*.pem' 'backend.hcl' '.env' '.env.*' | grep -v '\.example$' | grep -q .; then
+            echo "ERROR: Tracked state, backend config, or secret file detected."
+            exit 1
+          fi
+          if git ls-files '*.tfvars' | grep -v '\.example$' | grep -q .; then
+            echo "ERROR: Tracked *.tfvars file detected (commit *.tfvars.example only)."
+            exit 1
+          fi
+      - name: Gitleaks Secret Scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  fmt-and-validate:
+    name: Terraform Format & Validate
+    needs: secret-and-hygiene-scan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir:
+          - bootstrap
+          - environments/dev
+          - environments/staging
+          - environments/prod
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - name: Check formatting
+        run: terraform fmt -check -recursive
+      - name: Validate ${{ matrix.dir }}
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform init -backend=false -input=false
+          terraform validate
+
+  tflint:
+    name: TFLint AWS Ruleset
+    needs: secret-and-hygiene-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.54.0
+      - name: Initialize and run TFLint
+        run: |
+          tflint --init
+          tflint --recursive
+
+  iac-security-scan:
+    name: Checkov & Trivy IaC Security Scan
+    needs: secret-and-hygiene-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          config_file: .checkov.yaml
+          soft_fail: false
+      - name: Run Trivy IaC Config Scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: config
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+
+  terraform-unit-tests:
+    name: Native Terraform Unit Tests (Mocked AWS)
+    needs: fmt-and-validate
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir:
+          - modules/vpc
+          - modules/security_group
+          - modules/s3_bucket
+          - modules/alb
+          - modules/ec2_instance
+          - modules/observability
+          - environments/dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - name: Run terraform test in ${{ matrix.dir }}
+        working-directory: ${{ matrix.dir }}
+        run: |
+          terraform init -backend=false -input=false
+          terraform test -verbose
+
+  shell-lint:
+    name: ShellCheck Operational Scripts
+    needs: secret-and-hygiene-scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ShellCheck
+        run: shellcheck scripts/*.sh
+
+  pr-plan-preview:
+    name: OIDC PR Plan Preview (Dev)
+    if: github.event_name == 'pull_request'
+    needs: [tflint, iac-security-scan, terraform-unit-tests, shell-lint]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check AWS OIDC configuration
+        id: oidc
+        env:
+          AWS_OIDC_ROLE_ARN: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          if [ -n "$AWS_OIDC_ROLE_ARN" ] && [ -n "$TF_STATE_BUCKET" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "AWS OIDC variables not configured — skipping live plan preview."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.oidc.outputs.enabled == 'true'
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.oidc.outputs.enabled == 'true'
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.oidc.outputs.enabled == 'true'
+        with:
+          terraform_version: "1.10.5"
+      - name: Run Terraform Plan (dev)
+        if: steps.oidc.outputs.enabled == 'true'
+        working-directory: environments/dev
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=aws-platform/dev/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION || 'us-east-1' }}"
+          terraform plan -no-color -input=false -var-file=terraform.tfvars.example

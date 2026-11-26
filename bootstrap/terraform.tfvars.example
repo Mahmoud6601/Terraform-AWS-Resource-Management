@@ -1,0 +1,7 @@
+# Copy to terraform.tfvars (gitignored) and replace with your globally unique bucket name.
+aws_region                  = "us-east-1"
+project_name                = "aws-platform"
+state_bucket_name           = "replace-with-unique-tfstate-bucket-name"
+lock_table_name             = "aws-platform-tfstate-locks"
+create_github_oidc_provider = false
+github_repository           = ""

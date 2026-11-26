@@ -1,0 +1,26 @@
+# Copy to terraform.tfvars (gitignored) and replace placeholder bucket name.
+aws_region                  = "us-east-1"
+project_name                = "aws-plat"
+environment                 = "dev"
+vpc_cidr                    = "10.10.0.0/16"
+azs                         = ["us-east-1a", "us-east-1b"]
+public_subnets              = ["10.10.1.0/24", "10.10.2.0/24"]
+private_subnets             = ["10.10.11.0/24", "10.10.12.0/24"]
+isolated_subnets            = ["10.10.21.0/24", "10.10.22.0/24"]
+enable_nat_gateway          = true
+single_nat_gateway          = true
+artifacts_bucket_name       = "replace-with-unique-dev-artifacts-bucket"
+s3_force_destroy            = true
+alb_deletion_protection     = false
+acm_certificate_arn         = null
+instance_type               = "t3.micro"
+asg_min_size                = 1
+asg_max_size                = 2
+asg_desired_capacity        = 1
+root_volume_size_gb         = 20
+log_retention_days          = 14
+kms_deletion_window_in_days = 7
+tags = {
+  Owner      = "platform-engineering"
+  CostCenter = "cloud-infra"
+}

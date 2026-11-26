@@ -1,0 +1,27 @@
+framework:
+  - terraform
+compact: true
+quiet: false
+soft-fail: false
+skip-check:
+  # S3 cross-region replication & event notifications are optional cost/scope controls for portfolio environments.
+  - CKV_AWS_144
+  - CKV2_AWS_62
+  # Bootstrap state bucket does not self-log to avoid recursive log-bucket bootstrap dependency.
+  - CKV_AWS_18
+  # WAF association on ALB is optional in dev/staging; documented in docs/SECURITY.md for prod edge hardening.
+  - CKV2_AWS_28
+  # ALB deletion protection is parameterized (false in dev/staging for clean teardown, true in prod).
+  - CKV_AWS_150
+  # Port 80 listener/SG rule exists solely for HTTP->HTTPS 301 redirect when ACM cert is attached (or dev probe).
+  - CKV_AWS_2
+  - CKV_AWS_103
+  - CKV_AWS_260
+  - CKV_AWS_378
+  - CKV2_AWS_20
+  # Reusable modules/security_group attaches SGs in calling environment roots; Checkov flags standalone module dir.
+  - CKV2_AWS_5
+  # S3 lifecycle abort_incomplete_multipart_upload is configured; Checkov static parser misses dynamic filter{} form.
+  - CKV_AWS_300
+  # OIDC sub claim is strictly pinned to repo:${var.github_repository}:ref:refs/heads/main via StringEquals; Checkov flags parameterized var interpolation.
+  - CKV_AWS_393

@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Minimal DevOps verification payload for ALB /healthz target probes.
+set -euo pipefail
+
+dnf install -y nginx >/dev/null 2>&1 || yum install -y nginx >/dev/null 2>&1
+
+TOKEN="$(curl -fsS -X PUT 'http://169.254.169.254/latest/api/token' -H 'X-aws-ec2-metadata-token-ttl-seconds: 21600')"
+INSTANCE_ID="$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id)"
+AZ="$(curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/placement/availability-zone)"
+
+cat > /usr/share/nginx/html/healthz <<EOF
+{"status":"ok","service":"${name_prefix}","environment":"${environment}","instance_id":"$${INSTANCE_ID}","az":"$${AZ}"}
+EOF
+
+cat > /etc/nginx/conf.d/healthz.conf <<'NGINX'
+server {
+    listen 80 default_server;
+    server_tokens off;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+
+    location = /healthz {
+        default_type application/json;
+        alias /usr/share/nginx/html/healthz;
+    }
+
+    location / {
+        return 200 '{"status":"ok","probe":"/healthz"}';
+        add_header Content-Type application/json;
+    }
+}
+NGINX
+
+rm -f /etc/nginx/conf.d/default.conf || true
+systemctl enable --now nginx

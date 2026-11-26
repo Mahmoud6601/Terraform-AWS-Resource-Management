@@ -1,0 +1,71 @@
+name: Terraform Drift Detection
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  issues: write
+
+jobs:
+  detect-drift:
+    name: Drift Check (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment: [dev, staging, prod]
+    steps:
+      - name: Check AWS OIDC configuration
+        id: oidc
+        env:
+          AWS_OIDC_ROLE_ARN: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          if [ -n "$AWS_OIDC_ROLE_ARN" ] && [ -n "$TF_STATE_BUCKET" ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "AWS OIDC variables not configured — skipping scheduled drift check."
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.oidc.outputs.enabled == 'true'
+      - uses: aws-actions/configure-aws-credentials@v4
+        if: steps.oidc.outputs.enabled == 'true'
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.oidc.outputs.enabled == 'true'
+        with:
+          terraform_version: "1.10.5"
+      - name: Run Refresh-Only Plan
+        if: steps.oidc.outputs.enabled == 'true'
+        id: drift
+        working-directory: environments/${{ matrix.environment }}
+        continue-on-error: true
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=aws-platform/${{ matrix.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION || 'us-east-1' }}"
+          set +e
+          terraform plan -refresh-only -detailed-exitcode -no-color -input=false
+          code=$?
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+          if [ "$code" -eq 1 ]; then exit 1; fi
+      - name: Open Drift Issue
+        if: steps.oidc.outputs.enabled == 'true' && steps.drift.outputs.exitcode == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Infrastructure drift detected in ${{ matrix.environment }}`,
+              body: `Scheduled drift detection run ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId} detected live AWS state divergence in \`environments/${{ matrix.environment }}\`. Inspect the plan output and reconcile via PR.`,
+              labels: ['infra-drift']
+            });

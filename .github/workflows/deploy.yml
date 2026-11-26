@@ -1,0 +1,88 @@
+name: Terraform Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Target AWS environment"
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      action:
+        description: "Terraform action"
+        required: true
+        default: plan
+        type: choice
+        options:
+          - plan
+          - apply
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  plan:
+    name: Plan (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}-plan
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify AWS OIDC variables
+        env:
+          AWS_OIDC_ROLE_ARN: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+        run: |
+          : "${AWS_OIDC_ROLE_ARN:?Set repository/environment variable AWS_OIDC_ROLE_ARN}"
+          : "${TF_STATE_BUCKET:?Set repository/environment variable TF_STATE_BUCKET}"
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - name: Init & Plan
+        working-directory: environments/${{ inputs.environment }}
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=aws-platform/${{ inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION || 'us-east-1' }}"
+          terraform plan -input=false -out=tfplan
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: environments/${{ inputs.environment }}/tfplan
+          retention-days: 3
+
+  apply:
+    name: Apply (${{ inputs.environment }})
+    if: inputs.action == 'apply'
+    needs: plan
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_OIDC_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+      - uses: actions/download-artifact@v4
+        with:
+          name: tfplan-${{ inputs.environment }}
+          path: environments/${{ inputs.environment }}
+      - name: Init, Pre-Apply State Backup & Apply
+        run: |
+          terraform -chdir="environments/${{ inputs.environment }}" init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="key=aws-platform/${{ inputs.environment }}/terraform.tfstate" \
+            -backend-config="region=${{ vars.AWS_REGION || 'us-east-1' }}"
+          bash ./scripts/backup-state.sh "${{ inputs.environment }}" || true
+          terraform -chdir="environments/${{ inputs.environment }}" apply -input=false -auto-approve tfplan

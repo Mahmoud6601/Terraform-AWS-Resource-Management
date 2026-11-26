@@ -1,0 +1,8 @@
+# Intentional internet-facing ALB in public subnets (protected by SG + TLS 1.3 + drop_invalid_header_fields).
+AVD-AWS-0053
+
+# Port 80 listener exists solely for HTTP->HTTPS 301 redirect (when ACM cert is set) or dev health probe.
+AVD-AWS-0054
+
+# Private compute instances require outbound HTTPS (443) for AWS SSM Session Manager and OS security patching.
+AVD-AWS-0104

@@ -1,0 +1,13 @@
+* text=auto eol=lf
+*.tf text eol=lf
+*.tfvars text eol=lf
+*.tfvars.example text eol=lf
+*.hcl text eol=lf
+*.hcl.example text eol=lf
+*.tftest.hcl text eol=lf
+*.tftpl text eol=lf
+*.sh text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+Makefile text eol=lf
